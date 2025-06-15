@@ -156,7 +156,13 @@ class Command(BaseCommand):
                     fecha_participacion = fake.date_between(start_date=date(anio, 3, 1), end_date=date(anio, 11, 30))
                     if fecha_participacion not in fechas_participacion_usadas:
                         fechas_participacion_usadas.add(fecha_participacion)
-                        participaciones_a_crear.append(Participacion(inscripcion=inscripcion, materia=asignacion.materia, fecha=fecha_participacion, puntuacion=random.uniform(0.0, 10.0), profesor=asignacion.profesor))
+                        participaciones_a_crear.append(Participacion(
+                            inscripcion=inscripcion,
+                            materia=asignacion.materia,
+                            fecha=fecha_participacion,
+                            puntuacion=round(random.uniform(3.0, 10.0), 2),  # Rango modificado
+                            profesor=asignacion.profesor
+                        ))
 
         # Inserción masiva final
         self.stdout.write(f'  Insertando {len(notas_a_crear)} notas...')
