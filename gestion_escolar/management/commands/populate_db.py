@@ -355,11 +355,11 @@ class Command(BaseCommand):
 
         # --- Actividades, Notas, Asistencia, Participación, Entregas ---
         self.stdout.write(f'  Generando datos transaccionales para el año {anio_academico}...')
-        notas_list = []
-        asistencias_list = []
-        participaciones_list = []
-        actividades_list = []
-        entregas_list = []
+        notas_a_crear = []
+        asistencias_a_crear = []
+        participaciones_a_crear = []
+        actividades_a_crear = []
+        entregas_a_crear = []
 
         all_actividades_anio = []
         for asignacion in asignaciones_anio:
@@ -391,129 +391,65 @@ class Command(BaseCommand):
                     }
                 )
                 if created:
-                    actividades_list.append(actividad_obj)
+                    actividades_a_crear.append(actividad_obj)
                 all_actividades_anio.append(actividad_obj)
 
+        inscripciones_anio_actual = list(Inscripcion.objects.filter(anio_academico=anio_academico).select_related('alumno', 'curso'))
+        if not inscripciones_anio_actual:
+            self.stdout.write(self.style.WARNING(f"   No hay inscripciones para el año {anio_academico}. Saltando datos transaccionales."))
+            return
+
         for inscripcion in inscripciones_anio_actual:
-            materias_del_alumno_en_inscripcion = AsignacionCursoMateria.objects.filter(
+            materias_del_alumno_qs = AsignacionCursoMateria.objects.filter(
                 curso=inscripcion.curso,
                 anio_academico=inscripcion.anio_academico,
                 periodo=inscripcion.periodo
-            ).values_list('materia', flat=True)
-            for materia_id in materias_del_alumno_en_inscripcion:
-                materia = Materia.objects.get(id=materia_id)
-                profesor_materia = AsignacionCursoMateria.objects.filter(
-                    curso=inscripcion.curso,
-                    materia=materia,
-                    anio_academico=inscripcion.anio_academico,
-                    periodo=inscripcion.periodo
-                ).first().profesor
+            ).select_related('materia', 'profesor')
+
+            for asignacion in materias_del_alumno_qs:
+                materia = asignacion.materia
+                profesor_materia = asignacion.profesor
+
+                # Generar Notas en memoria
                 num_notas = random.randint(3, 5)
                 for _ in range(num_notas):
-                    calificacion = round(random.uniform(50.0, 100.0), 2)
-                    if random.random() < 0.15:
-                        calificacion = round(random.uniform(0.0, 59.99), 2)
-                    fecha_evaluacion = fake.date_between(
-                        start_date=start_date_academic_year,
-                        end_date=end_date_academic_year
-                    )
-                    nota_obj, created = Nota.objects.get_or_create(
-                        inscripcion=inscripcion,
-                        materia=materia,
-                        profesor=profesor_materia,
-                        fecha_evaluacion=fecha_evaluacion,
-                        tipo_evaluacion=random.choice([c[0] for c in Nota.TIPO_EVALUACION_CHOICES]),
-                        defaults={'calificacion': calificacion}
-                    )
-                    if created:
-                        notas_list.append(nota_obj)
+                    calificacion = round(random.uniform(40.0, 100.0), 2)
+                    fecha_evaluacion = fake.date_between(start_date=start_date_academic_year, end_date=end_date_academic_year)
+                    notas_a_crear.append(Nota(
+                        inscripcion=inscripcion, materia=materia, profesor=profesor_materia,
+                        fecha_evaluacion=fecha_evaluacion, calificacion=calificacion,
+                        tipo_evaluacion=random.choice([c[0] for c in Nota.TIPO_EVALUACION_CHOICES])
+                    ))
+
+                # Generar Asistencias en memoria
                 num_asistencias = random.randint(15, 30)
                 for _ in range(num_asistencias):
-                    fecha_asistencia = fake.date_between(
-                        start_date=start_date_academic_year,
-                        end_date=end_date_academic_year
-                    )
-                    asistencia_obj, created = Asistencia.objects.get_or_create(
-                        inscripcion=inscripcion,
-                        materia=materia,
-                        fecha=fecha_asistencia,
-                        defaults={
-                            'estado': random.choices([c[0] for c in Asistencia.ESTADO_ASISTENCIA_CHOICES], weights=[0.85, 0.1, 0.03, 0.02], k=1)[0],
-                            'profesor': profesor_materia
-                        }
-                    )
-                    if created:
-                        asistencias_list.append(asistencia_obj)
+                    fecha_asistencia = fake.date_between(start_date=start_date_academic_year, end_date=end_date_academic_year)
+                    asistencias_a_crear.append(Asistencia(
+                        inscripcion=inscripcion, materia=materia, fecha=fecha_asistencia,
+                        estado=random.choices([c[0] for c in Asistencia.ESTADO_ASISTENCIA_CHOICES], weights=[0.85, 0.1, 0.03, 0.02], k=1)[0],
+                        profesor=profesor_materia
+                    ))
+                
+                # Generar Participaciones en memoria
                 num_participaciones = random.randint(5, 15)
                 for _ in range(num_participaciones):
-                    fecha_participacion = fake.date_between(
-                        start_date=start_date_academic_year,
-                        end_date=end_date_academic_year
-                    )
-                    participacion_obj, created = Participacion.objects.get_or_create(
-                        inscripcion=inscripcion,
-                        materia=materia,
-                        fecha=fecha_participacion,
-                        defaults={
-                            'puntuacion': round(random.uniform(0.0, 9.99), 2),
-                            'comentarios': fake.sentence() if random.random() < 0.2 else None,
-                            'profesor': profesor_materia
-                        }
-                    )
-                    if created:
-                        participaciones_list.append(participacion_obj)
-                actividades_materia_profesor = [
-                    act for act in all_actividades_anio
-                    if act.materia == materia and act.profesor == profesor_materia
-                ]
-                for actividad in actividades_materia_profesor:
-                    if actividad.fecha_asignacion >= inscripcion.fecha_inscripcion:
-                        if random.random() < 0.95:
-                            puntuacion_obtenida = round(random.uniform(0.0, float(actividad.max_puntuacion)), 2)
-                            if puntuacion_obtenida < actividad.max_puntuacion * 0.4:
-                                puntuacion_obtenida = round(random.uniform(actividad.max_puntuacion * 0.4, actividad.max_puntuacion), 2)
-                        effective_end_date_for_delivery = min(actividad.fecha_entrega_limite + timedelta(days=5), end_date_academic_year)
-                        if effective_end_date_for_delivery < actividad.fecha_asignacion:
-                            fecha_entrega = actividad.fecha_asignacion
-                        else:
-                            fecha_entrega = fake.date_time_between(
-                                start_date=actividad.fecha_asignacion,
-                                end_date=effective_end_date_for_delivery
-                            ).date()
-                        if fecha_entrega > actividad.fecha_entrega_limite:
-                            estado = 'Retrasado'
-                        else:
-                            estado = 'Entregado'
-                        entrega_obj, created = EntregaActividad.objects.get_or_create(
-                            actividad=actividad,
-                            alumno=inscripcion.alumno,
-                            defaults={
-                                'fecha_entrega': fecha_entrega,
-                                'puntuacion_obtenida': puntuacion_obtenida,
-                                'comentarios_profesor': fake.sentence() if random.random() < 0.1 else None,
-                                'estado_entrega': estado
-                            }
-                        )
-                        if created:
-                            entregas_list.append(entrega_obj)
-                    else:
-                        fecha_entrega_no_entregado = actividad.fecha_entrega_limite + timedelta(days=random.randint(1, 10))
-                        if fecha_entrega_no_entregado > end_date_academic_year:
-                            fecha_entrega_no_entregado = end_date_academic_year
-                        entrega_obj, created = EntregaActividad.objects.get_or_create(
-                            actividad=actividad,
-                            alumno=inscripcion.alumno,
-                            defaults={
-                                'fecha_entrega': fecha_entrega_no_entregado,
-                                'puntuacion_obtenida': 0.0,
-                                'comentarios_profesor': "No entregó la actividad a tiempo.",
-                                'estado_entrega': 'No Entregado'
-                            }
-                        )
-                        if created:
-                            entregas_list.append(entrega_obj)
-        self.stdout.write(self.style.SUCCESS(f'  {len(actividades_list)} Actividades creadas para {anio_academico}.'))
-        self.stdout.write(self.style.SUCCESS(f'  {len(notas_list)} Notas creadas para {anio_academico}.'))
-        self.stdout.write(self.style.SUCCESS(f'  {len(asistencias_list)} Asistencias creadas para {anio_academico}.'))
-        self.stdout.write(self.style.SUCCESS(f'  {len(participaciones_list)} Participaciones creadas para {anio_academico}.'))
-        self.stdout.write(self.style.SUCCESS(f'  {len(entregas_list)} Entregas de Actividades creadas para {anio_academico}.'))
+                    fecha_participacion = fake.date_between(start_date=start_date_academic_year, end_date=end_date_academic_year)
+                    participaciones_a_crear.append(Participacion(
+                        inscripcion=inscripcion, materia=materia, fecha=fecha_participacion,
+                        puntuacion=round(random.uniform(0.0, 9.99), 2),
+                        comentarios=(fake.sentence() if random.random() < 0.2 else None),
+                        profesor=profesor_materia
+                    ))
+
+        # --- OPTIMIZACIÓN: Escribimos todo en la base de datos en grandes lotes ---
+        self.stdout.write(f'  Insertando {len(notas_a_crear)} notas en la base de datos...')
+        Nota.objects.bulk_create(notas_a_crear, batch_size=1000)
+        
+        self.stdout.write(f'  Insertando {len(asistencias_a_crear)} asistencias en la base de datos...')
+        Asistencia.objects.bulk_create(asistencias_a_crear, batch_size=1000)
+
+        self.stdout.write(f'  Insertando {len(participaciones_a_crear)} participaciones en la base de datos...')
+        Participacion.objects.bulk_create(participaciones_a_crear, batch_size=1000)
+        
+        self.stdout.write(self.style.SUCCESS(f'  Datos transaccionales para {anio_academico} creados.'))
