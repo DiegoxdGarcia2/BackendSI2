@@ -35,25 +35,19 @@ def categorizar_nota(nota):
     else:
         return "Bajo rendimiento"
 
-def generar_recomendaciones(estudiante_df):
-    # Esta función necesita los percentiles, que son constantes. 
-    # Podríamos calcularlos una vez en el script de entrenamiento y guardarlos,
-    # pero por simplicidad, los definimos aquí como constantes.
-    percentiles = {'asistencia': 25.0, 'participaciones': 25.0, 'evaluaciones': 25.0} # Valores aproximados
-
+def generar_recomendaciones(estudiante_df, percentiles):
     recomendaciones = []
-    asistencia_baja = estudiante_df["asistencia"].values[0] < percentiles['asistencia']
-    participacion_baja = estudiante_df["participaciones"].values[0] < percentiles['participaciones']
-    evaluaciones_baja = estudiante_df["evaluaciones"].values[0] < percentiles['evaluaciones']
-    
-    if participacion_baja and not asistencia_baja and not evaluaciones_baja:
-        recomendaciones.append("¡Muy buen trabajo en asistencia y evaluaciones! Sin embargo, tu participación es extremadamente baja. Participar más en clase te ayudará a consolidar tu aprendizaje.")
-    if asistencia_baja:
-        recomendaciones.append("Tu asistencia es baja. Intenta asistir con más frecuencia para mejorar tu aprendizaje.")
-    if participacion_baja:
-        recomendaciones.append("Tu nivel de participación es críticamente bajo. Considera hablar más en clases, hacer preguntas o involucrarte en debates para fortalecer tu aprendizaje.")
-    if evaluaciones_baja:
-        recomendaciones.append("Tus evaluaciones muestran oportunidades de mejora. Puedes probar técnicas de estudio como la repetición activa.")
+    # Obtener los valores del estudiante actual
+    asistencia_actual = estudiante_df["asistencia"].iloc[0]
+    participacion_actual = estudiante_df["participaciones"].iloc[0]
+    evaluaciones_actual = estudiante_df["evaluaciones"].iloc[0]
+    # Comparar con los percentiles del grupo
+    if asistencia_actual < percentiles["asistencia"]:
+        recomendaciones.append("Tu asistencia es más baja que la de tus compañeros. Intenta asistir con más frecuencia para mejorar tu aprendizaje.")
+    if participacion_actual < percentiles["participaciones"]:
+        recomendaciones.append("Tu nivel de participación es bajo en comparación con tu clase. Considera hablar más, hacer preguntas o involucrarte en debates.")
+    if evaluaciones_actual < percentiles["evaluaciones"]:
+        recomendaciones.append("Tus evaluaciones muestran oportunidades de mejora en comparación con el resto del curso. Puedes probar nuevas técnicas de estudio.")
     if not recomendaciones:
         recomendaciones.append("¡Excelente trabajo! Tu rendimiento es sólido. Sigue así para mantener tu éxito académico.")
     return recomendaciones
@@ -71,13 +65,17 @@ if __name__ == "__main__":
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.metrics import mean_squared_error, r2_score, accuracy_score
 
-    # 1. Generar los datos (solo para entrenar)
-    print("Generando 100,000 filas de datos de entrenamiento...")
+    # --- NUEVA LÓGICA DE GENERACIÓN DE DATOS BALANCEADOS ---
+    print("Generando datos de entrenamiento balanceados...")
+    
+    num_ejemplos_por_categoria = 35000 # ~100k en total
     data = []
-    for _ in range(100000):
-        asistencia = random.randint(1, 100)
-        participaciones = random.randint(1, 100)
-        evaluaciones = random.randint(1, 100)
+
+    # 1. Generar estudiantes de BAJO rendimiento
+    for _ in range(num_ejemplos_por_categoria):
+        asistencia = random.randint(20, 70)
+        participaciones = random.randint(10, 60)
+        evaluaciones = random.randint(0, 65)
         nota_final = round((asistencia + participaciones + evaluaciones) / 3, 2)
         data.append({
             "asistencia": asistencia,
@@ -85,9 +83,38 @@ if __name__ == "__main__":
             "evaluaciones": evaluaciones,
             "nota_final": nota_final
         })
+
+    # 2. Generar estudiantes de rendimiento PROMEDIO
+    for _ in range(num_ejemplos_por_categoria):
+        asistencia = random.randint(60, 95)
+        participaciones = random.randint(45, 85)
+        evaluaciones = random.randint(50, 85)
+        nota_final = round((asistencia + participaciones + evaluaciones) / 3, 2)
+        data.append({
+            "asistencia": asistencia,
+            "participaciones": participaciones,
+            "evaluaciones": evaluaciones,
+            "nota_final": nota_final
+        })
+        
+    # 3. Generar estudiantes de ALTO rendimiento
+    for _ in range(num_ejemplos_por_categoria):
+        asistencia = random.randint(85, 100)
+        participaciones = random.randint(75, 100)
+        evaluaciones = random.randint(80, 100)
+        nota_final = round((asistencia + participaciones + evaluaciones) / 3, 2)
+        data.append({
+            "asistencia": asistencia,
+            "participaciones": participaciones,
+            "evaluaciones": evaluaciones,
+            "nota_final": nota_final
+        })
+
     df = pd.DataFrame(data)
+    # La función 'categorizar_nota' sigue siendo la misma y es correcta
     df["rendimiento"] = df["nota_final"].apply(categorizar_nota)
-    print("Datos generados.")
+    print("Datos generados. Distribución de rendimiento:")
+    print(df.rendimiento.value_counts()) # Verás que ahora está mucho más balanceado
 
     # 2. Entrenar y guardar el Modelo de Regresión
     print("Entrenando modelo de Regresión Lineal...")

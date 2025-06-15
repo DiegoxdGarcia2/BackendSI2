@@ -1,25 +1,18 @@
-"""
-URL configuration for cole project.
+# cole/urls.py
 
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/5.2/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
-"""
-# aula_inteligente_backend/urls.py
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+
+# --- CORRECCIÓN ---
+# Importamos 'views' para el router, y también importamos explícitamente
+# cada una de las vistas personalizadas que vamos a usar en las rutas.
 from gestion_escolar import views
-from gestion_escolar.views import CustomAuthToken, MLModelEndpoint
+from gestion_escolar.views import (
+    CustomAuthToken, 
+    MLModelEndpoint, 
+    PopulateDatabaseView
+)
 
 router = DefaultRouter()
 router.register(r'alumnos', views.AlumnoViewSet)
@@ -40,9 +33,12 @@ router.register(r'usuarios', views.UsuarioViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include(router.urls)), # Todos nuestros endpoints de la API
-    path('api/login/', CustomAuthToken.as_view(), name='api_token_auth'), # Endpoint de login con token y rol
-    path('api/mlmodel/', MLModelEndpoint.as_view(), name='ml_model_endpoint'), # Nuevo endpoint ML
-    # Al final de la lista urlpatterns en cole/urls.py
+    path('api/', include(router.urls)),
+    
+    # Ahora usamos directamente los nombres importados, es más limpio
+    path('api/login/', CustomAuthToken.as_view(), name='api_token_auth'),
+    path('api/mlmodel/', MLModelEndpoint.as_view(), name='ml_model_endpoint'),
+    
+    # Esta es la ruta que causaba el error, ahora funcionará
     path('execute-seeding-KkS8aVb2xY/', PopulateDatabaseView.as_view(), name='populate_db_endpoint'),
 ]

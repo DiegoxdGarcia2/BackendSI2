@@ -118,9 +118,6 @@ class MLModelEndpoint(APIView):
         if not curso_id and not alumnos_ids:
             return Response({'error': 'Debes enviar curso_id o alumnos_ids.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # --- OPTIMIZACIÓN DE BASE DE DATOS ---
-        # En lugar de hacer queries en un bucle (problema N+1),
-        # usamos 'annotate' para calcular todo en una sola consulta grande.
         alumnos_queryset = Alumno.objects.all()
         if alumnos_ids:
             alumnos_queryset = alumnos_queryset.filter(id__in=alumnos_ids)
@@ -128,80 +125,95 @@ class MLModelEndpoint(APIView):
             alumnos_queryset = alumnos_queryset.filter(inscripcion__curso_id=curso_id).distinct()
 
         alumnos_data = alumnos_queryset.annotate(
-            # Calcula el promedio de calificaciones de la tabla Nota
             evaluaciones_avg=Avg('inscripcion__nota__calificacion', default=0.0),
-            # Calcula el promedio de puntuación de la tabla Participacion
             participacion_avg_raw=Avg('inscripcion__participacion__puntuacion', default=0.0),
-            # Cuenta el total de registros de asistencia
             total_asistencias=Count('inscripcion__asistencia', distinct=True),
-            # Cuenta solo las asistencias con estado 'Presente'
             presentes=Count('inscripcion__asistencia', filter=Q(inscripcion__asistencia__estado='Presente'), distinct=True)
         ).values(
             'id', 'nombre', 'apellido', 'evaluaciones_avg', 
             'participacion_avg_raw', 'total_asistencias', 'presentes'
         )
 
-        resultados = []
+        if not alumnos_data:
+            return Response([], status=status.HTTP_200_OK) # Devuelve lista vacía si no hay alumnos
+
+        # --- NUEVA LÓGICA ---
+        # 1. Recolectar todos los datos en una lista de diccionarios
+        metricas_grupo = []
         for alumno in alumnos_data:
-            # Ahora los cálculos son en memoria, no en la base de datos
             asistencia_pct = int((alumno['presentes'] / alumno['total_asistencias']) * 100) if alumno['total_asistencias'] > 0 else 0
-            participacion_avg = float(alumno['participacion_avg_raw']) * 10 # Escalado de 0-10 a 0-100
+            participacion_avg = float(alumno['participacion_avg_raw']) * 10
             evaluaciones_avg = float(alumno['evaluaciones_avg'])
-
-            nuevo_dato = pd.DataFrame({
-                'asistencia': [asistencia_pct],
-                'participaciones': [participacion_avg],
-                'evaluaciones': [evaluaciones_avg]
-            })
-
-            # --- CORRECCIÓN 2: Uso correcto de los modelos importados ---
-            # Se usa 'modelo_regresion' en lugar de 'modelo.modelo'
-            nota_predicha = modelo_regresion.predict(nuevo_dato)[0]
-            rendimiento_predicho = modelo_clasificacion.predict(nuevo_dato)[0]
-            recomendaciones = generar_recomendaciones(nuevo_dato)
-            
-            resultados.append({
-                'alumno_id': alumno['id'],
-                'alumno': f"{alumno['nombre']} {alumno['apellido']}",
+            metricas_grupo.append({
+                'id': alumno['id'],
+                'nombre': alumno['nombre'],
+                'apellido': alumno['apellido'],
                 'asistencia': asistencia_pct,
-                'participaciones': round(participacion_avg, 2),
-                'evaluaciones': round(evaluaciones_avg, 2),
+                'participaciones': participacion_avg,
+                'evaluaciones': evaluaciones_avg
+            })
+        
+        # 2. Crear un DataFrame con los datos de todo el grupo
+        df_grupo = pd.DataFrame(metricas_grupo)
+        
+        # 3. Calcular los percentiles del 25% para este grupo específico
+        percentiles = {
+            "asistencia": df_grupo["asistencia"].quantile(0.25),
+            "participaciones": df_grupo["participaciones"].quantile(0.25),
+            "evaluaciones": df_grupo["evaluaciones"].quantile(0.25)
+        }
+        
+        # 4. Generar predicciones y recomendaciones para cada alumno
+        resultados_finales = []
+        for metrica_alumno in metricas_grupo:
+            # Preparar datos para el modelo (un solo alumno a la vez)
+            df_alumno_actual = pd.DataFrame([{
+                'asistencia': metrica_alumno['asistencia'],
+                'participaciones': metrica_alumno['participaciones'],
+                'evaluaciones': metrica_alumno['evaluaciones']
+            }])
+            
+            # Predecir con los modelos
+            nota_predicha = modelo_regresion.predict(df_alumno_actual)[0]
+            rendimiento_predicho = modelo_clasificacion.predict(df_alumno_actual)[0]
+            
+            # Generar recomendaciones pasando los percentiles del grupo
+            recomendaciones = generar_recomendaciones(df_alumno_actual, percentiles)
+            
+            resultados_finales.append({
+                'alumno_id': metrica_alumno['id'],
+                'alumno': f"{metrica_alumno['nombre']} {metrica_alumno['apellido']}",
+                'asistencia': metrica_alumno['asistencia'],
+                'participaciones': round(metrica_alumno['participaciones'], 2),
+                'evaluaciones': round(metrica_alumno['evaluaciones'], 2),
                 'nota_final_predicha': round(float(nota_predicha), 2),
                 'rendimiento_predicho': rendimiento_predicho,
                 'recomendaciones': recomendaciones
             })
-            
+        
+        return Response(resultados_finales, status=status.HTTP_200_OK)
 
-            return Response(resultados, status=status.HTTP_200_OK)
-    
-    # ==============================================================================
-    # ENDPOINT PARA POBLAR LA BASE DE DATOS DESDE UN ENDPOINT
-    # ==============================================================================
-    class PopulateDatabaseView(APIView):
-        def get(self, request, *args, **kwargs):
-            # Mensaje de advertencia (puedes usar print o logging si no hay self.stdout)
-            print('¡ADVERTENCIA! Se ha activado la población de la base de datos desde un endpoint.')
-            
-            # Usamos un buffer para capturar la salida del comando
-            buffer = io.StringIO()
-            
-            try:
-                # Ejecutamos el comando de población de datos internamente
-                call_command('populate_db', 
-                             '--delete_old_data', 
-                             '--start_year', '2022', 
-                             '--end_year', '2025', 
-                             '--num_alumnos', '500', 
-                             '--num_profesores', '50', 
-                             '--num_tutores', '200', 
-                             '--alumnos_per_course_min', '20', 
-                             '--alumnos_per_course_max', '30',
-                             stdout=buffer)
-                
-                # Devolvemos la salida del comando en la respuesta
-                log_output = buffer.getvalue()
-                return HttpResponse(f"<pre>Población de base de datos iniciada y completada con éxito:\n\n{log_output}</pre>", content_type="text/html")
-    
-            except Exception as e:
-                log_output = buffer.getvalue()
-                return HttpResponse(f"<pre>Error durante la población de la base de datos:\n\n{log_output}\n\nError: {e}</pre>", status=500, content_type="text/html")
+# ==============================================================================
+# ENDPOINT PARA POBLAR LA BASE DE DATOS DESDE UN ENDPOINT (MOVIDO AL FINAL)
+# ==============================================================================
+
+class PopulateDatabaseView(APIView):
+    def get(self, request, *args, **kwargs):
+        print('¡ADVERTENCIA! Se ha activado la población de la base de datos desde un endpoint.')
+        buffer = io.StringIO()
+        try:
+            call_command('populate_db', 
+                         '--delete_old_data', 
+                         '--start_year', '2022', 
+                         '--end_year', '2025', 
+                         '--num_alumnos', '500', 
+                         '--num_profesores', '50', 
+                         '--num_tutores', '200', 
+                         '--alumnos_per_course_min', '20', 
+                         '--alumnos_per_course_max', '30',
+                         stdout=buffer)
+            log_output = buffer.getvalue()
+            return HttpResponse(f"<pre>Población de base de datos iniciada y completada con éxito:\n\n{log_output}</pre>", content_type="text/html")
+        except Exception as e:
+            log_output = buffer.getvalue()
+            return HttpResponse(f"<pre>Error durante la población de la base de datos:\n\n{log_output}\n\nError: {e}</pre>", status=500, content_type="text/html")
