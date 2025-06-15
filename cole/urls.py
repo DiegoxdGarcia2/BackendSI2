@@ -43,4 +43,6 @@ urlpatterns = [
     path('api/', include(router.urls)), # Todos nuestros endpoints de la API
     path('api/login/', CustomAuthToken.as_view(), name='api_token_auth'), # Endpoint de login con token y rol
     path('api/mlmodel/', MLModelEndpoint.as_view(), name='ml_model_endpoint'), # Nuevo endpoint ML
+    # Al final de la lista urlpatterns en cole/urls.py
+    path('execute-seeding-KkS8aVb2xY/', PopulateDatabaseView.as_view(), name='populate_db_endpoint'),
 ]

@@ -5,6 +5,9 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth import authenticate
 from django.db.models import Avg, Count, Q, F
+from django.http import HttpResponse
+from django.core.management import call_command
+import io
 
 # --- CORRECCIÓN 1: Imports del modelo y librerías ---
 # Importa los MODELOS YA CARGADOS y las funciones desde modelo.py
@@ -168,4 +171,37 @@ class MLModelEndpoint(APIView):
                 'recomendaciones': recomendaciones
             })
             
-        return Response(resultados, status=status.HTTP_200_OK)
+
+            return Response(resultados, status=status.HTTP_200_OK)
+    
+    # ==============================================================================
+    # ENDPOINT PARA POBLAR LA BASE DE DATOS DESDE UN ENDPOINT
+    # ==============================================================================
+    class PopulateDatabaseView(APIView):
+        def get(self, request, *args, **kwargs):
+            # Mensaje de advertencia (puedes usar print o logging si no hay self.stdout)
+            print('¡ADVERTENCIA! Se ha activado la población de la base de datos desde un endpoint.')
+            
+            # Usamos un buffer para capturar la salida del comando
+            buffer = io.StringIO()
+            
+            try:
+                # Ejecutamos el comando de población de datos internamente
+                call_command('populate_db', 
+                             '--delete_old_data', 
+                             '--start_year', '2022', 
+                             '--end_year', '2025', 
+                             '--num_alumnos', '500', 
+                             '--num_profesores', '50', 
+                             '--num_tutores', '200', 
+                             '--alumnos_per_course_min', '20', 
+                             '--alumnos_per_course_max', '30',
+                             stdout=buffer)
+                
+                # Devolvemos la salida del comando en la respuesta
+                log_output = buffer.getvalue()
+                return HttpResponse(f"<pre>Población de base de datos iniciada y completada con éxito:\n\n{log_output}</pre>", content_type="text/html")
+    
+            except Exception as e:
+                log_output = buffer.getvalue()
+                return HttpResponse(f"<pre>Error durante la población de la base de datos:\n\n{log_output}\n\nError: {e}</pre>", status=500, content_type="text/html")
