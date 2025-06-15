@@ -10,8 +10,7 @@ from rest_framework.routers import DefaultRouter
 from gestion_escolar import views
 from gestion_escolar.views import (
     CustomAuthToken, 
-    MLModelEndpoint, 
-    PopulateDatabaseView
+    MLModelEndpoint
 )
 
 router = DefaultRouter()
@@ -34,11 +33,6 @@ router.register(r'usuarios', views.UsuarioViewSet)
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
-    
-    # Ahora usamos directamente los nombres importados, es más limpio
     path('api/login/', CustomAuthToken.as_view(), name='api_token_auth'),
     path('api/mlmodel/', MLModelEndpoint.as_view(), name='ml_model_endpoint'),
-    
-    # Esta es la ruta que causaba el error, ahora funcionará
-    path('execute-seeding-KkS8aVb2xY/', PopulateDatabaseView.as_view(), name='populate_db_endpoint'),
 ]
