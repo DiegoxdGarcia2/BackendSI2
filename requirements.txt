@@ -1,6 +1,9 @@
 django
 djangorestframework
-scikit-learn
-pandas
-django-cors-headers
 psycopg2-binary
+gunicorn
+django-cors-headers
+joblib
+scikit-learn==1.7.0
+pandas
+Faker
