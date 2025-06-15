@@ -1,5 +1,18 @@
 # gestion_escolar/views.py
 from rest_framework import viewsets
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from django.contrib.auth import authenticate
+from django.db.models import Avg, Count, Q, F
+
+# --- CORRECCIÓN 1: Imports del modelo y librerías ---
+# Importa los MODELOS YA CARGADOS y las funciones desde modelo.py
+from modelo import modelo_regresion, modelo_clasificacion, generar_recomendaciones
+# Importa pandas directamente en este archivo
+import pandas as pd
+# El resto de tus imports
+import secrets
 from .models import (
     Alumno, Profesor, Curso, Materia, AsignacionCursoMateria, Inscripcion,
     Nota, Asistencia, ActividadProyecto, EntregaActividad, Participacion,
@@ -11,16 +24,11 @@ from .serializers import (
     AsistenciaSerializer, ActividadProyectoSerializer, EntregaActividadSerializer,
     ParticipacionSerializer, TutorSerializer, AlumnoTutorSerializer, UsuarioSerializer
 )
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from django.contrib.auth import authenticate
-import secrets
-import os
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from modelo import LinearRegression, RandomForestClassifier, pd, categorizar_nota
-from rest_framework.decorators import action
-from django.db import models
+
+
+# ==============================================================================
+# TUS VIEWSETS (No necesitan cambios)
+# ==============================================================================
 
 class AlumnoViewSet(viewsets.ModelViewSet):
     queryset = Alumno.objects.all()
@@ -29,6 +37,8 @@ class AlumnoViewSet(viewsets.ModelViewSet):
 class ProfesorViewSet(viewsets.ModelViewSet):
     queryset = Profesor.objects.all()
     serializer_class = ProfesorSerializer
+
+# ... (el resto de tus ViewSets que ya estaban bien) ...
 
 class CursoViewSet(viewsets.ModelViewSet):
     queryset = Curso.objects.all()
@@ -77,9 +87,11 @@ class AlumnoTutorViewSet(viewsets.ModelViewSet):
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
     serializer_class = UsuarioSerializer
-    # Puedes añadir permisos aquí más adelante:
-    # permission_classes = [permissions.IsAdminUser] # Ejemplo de solo admins
 
+
+# ==============================================================================
+# TU VISTA DE AUTENTICACIÓN (No necesita cambios)
+# ==============================================================================
 class CustomAuthToken(APIView):
     def post(self, request, *args, **kwargs):
         username = request.data.get('username')
@@ -87,65 +99,73 @@ class CustomAuthToken(APIView):
         user = authenticate(request, username=username, password=password)
         if user is not None:
             token = secrets.token_hex(32)
-            return Response({'token': token, 'rol': user.rol.lower()})
+            # CORRECCIÓN menor: es más seguro usar user.id que el objeto completo
+            return Response({'token': token, 'rol': user.rol.lower(), 'user_id': user.id})
         return Response({'error': 'Unable to log in with provided credentials.'}, status=400)
 
+
+# ==============================================================================
+# TU VISTA DEL MODELO DE ML (CORREGIDA Y OPTIMIZADA)
+# ==============================================================================
 class MLModelEndpoint(APIView):
     def post(self, request, *args, **kwargs):
-        from gestion_escolar.models import Alumno, Inscripcion, Nota, Asistencia, Participacion, Curso
-        import modelo
-        import pandas as pd
-        
-        # Permitir filtrar por curso o alumnos específicos
         curso_id = request.data.get('curso_id')
-        alumnos_ids = request.data.get('alumnos_ids')  # lista de IDs
-        
+        alumnos_ids = request.data.get('alumnos_ids')
+
         if not curso_id and not alumnos_ids:
-            return Response({'error': 'Debes enviar curso_id o alumnos_ids.'}, status=400)
-        
-        # Obtener alumnos
+            return Response({'error': 'Debes enviar curso_id o alumnos_ids.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # --- OPTIMIZACIÓN DE BASE DE DATOS ---
+        # En lugar de hacer queries en un bucle (problema N+1),
+        # usamos 'annotate' para calcular todo en una sola consulta grande.
+        alumnos_queryset = Alumno.objects.all()
         if alumnos_ids:
-            alumnos = Alumno.objects.filter(id__in=alumnos_ids)
+            alumnos_queryset = alumnos_queryset.filter(id__in=alumnos_ids)
         else:
-            inscripciones = Inscripcion.objects.filter(curso_id=curso_id)
-            alumnos = Alumno.objects.filter(id__in=inscripciones.values_list('alumno_id', flat=True))
-        
+            alumnos_queryset = alumnos_queryset.filter(inscripcion__curso_id=curso_id).distinct()
+
+        alumnos_data = alumnos_queryset.annotate(
+            # Calcula el promedio de calificaciones de la tabla Nota
+            evaluaciones_avg=Avg('inscripcion__nota__calificacion', default=0.0),
+            # Calcula el promedio de puntuación de la tabla Participacion
+            participacion_avg_raw=Avg('inscripcion__participacion__puntuacion', default=0.0),
+            # Cuenta el total de registros de asistencia
+            total_asistencias=Count('inscripcion__asistencia', distinct=True),
+            # Cuenta solo las asistencias con estado 'Presente'
+            presentes=Count('inscripcion__asistencia', filter=Q(inscripcion__asistencia__estado='Presente'), distinct=True)
+        ).values(
+            'id', 'nombre', 'apellido', 'evaluaciones_avg', 
+            'participacion_avg_raw', 'total_asistencias', 'presentes'
+        )
+
         resultados = []
-        for alumno in alumnos:
-            # Asistencia: contar asistencias presentes sobre total
-            inscripciones = Inscripcion.objects.filter(alumno=alumno)
-            total_asistencias = Asistencia.objects.filter(inscripcion__in=inscripciones).count()
-            presentes = Asistencia.objects.filter(inscripcion__in=inscripciones, estado='Presente').count()
-            asistencia_pct = int((presentes / total_asistencias) * 100) if total_asistencias > 0 else 0
-            # Participaciones: promedio de puntuacion (0-10) escalado a 100
-            participaciones = Participacion.objects.filter(inscripcion__in=inscripciones)
-            if participaciones.exists():
-                participacion_avg = float(participaciones.aggregate(avg=models.Avg('puntuacion'))['avg'] or 0) * 10
-            else:
-                participacion_avg = 0
-            # Evaluaciones: promedio de calificacion en Notas
-            notas = Nota.objects.filter(inscripcion__in=inscripciones)
-            if notas.exists():
-                evaluaciones_avg = float(notas.aggregate(avg=models.Avg('calificacion'))['avg'] or 0)
-            else:
-                evaluaciones_avg = 0
-            # Preparar dato para el modelo
+        for alumno in alumnos_data:
+            # Ahora los cálculos son en memoria, no en la base de datos
+            asistencia_pct = int((alumno['presentes'] / alumno['total_asistencias']) * 100) if alumno['total_asistencias'] > 0 else 0
+            participacion_avg = float(alumno['participacion_avg_raw']) * 10 # Escalado de 0-10 a 0-100
+            evaluaciones_avg = float(alumno['evaluaciones_avg'])
+
             nuevo_dato = pd.DataFrame({
                 'asistencia': [asistencia_pct],
                 'participaciones': [participacion_avg],
                 'evaluaciones': [evaluaciones_avg]
             })
-            nota_predicha = modelo.modelo.predict(nuevo_dato)[0]
-            rendimiento_predicho = modelo.modelo_clasificacion.predict(nuevo_dato)[0]
-            recomendaciones = modelo.generar_recomendaciones(nuevo_dato)
+
+            # --- CORRECCIÓN 2: Uso correcto de los modelos importados ---
+            # Se usa 'modelo_regresion' en lugar de 'modelo.modelo'
+            nota_predicha = modelo_regresion.predict(nuevo_dato)[0]
+            rendimiento_predicho = modelo_clasificacion.predict(nuevo_dato)[0]
+            recomendaciones = generar_recomendaciones(nuevo_dato)
+            
             resultados.append({
-                'alumno_id': alumno.id,
-                'alumno': str(alumno),
+                'alumno_id': alumno['id'],
+                'alumno': f"{alumno['nombre']} {alumno['apellido']}",
                 'asistencia': asistencia_pct,
-                'participaciones': participacion_avg,
-                'evaluaciones': evaluaciones_avg,
-                'nota_final_predicha': float(nota_predicha),
+                'participaciones': round(participacion_avg, 2),
+                'evaluaciones': round(evaluaciones_avg, 2),
+                'nota_final_predicha': round(float(nota_predicha), 2),
                 'rendimiento_predicho': rendimiento_predicho,
                 'recomendaciones': recomendaciones
             })
-        return Response(resultados)
+            
+        return Response(resultados, status=status.HTTP_200_OK)
