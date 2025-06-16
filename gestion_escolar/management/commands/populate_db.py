@@ -75,7 +75,7 @@ class Command(BaseCommand):
 
         # Profesores
         self.stdout.write('Creando Profesores...')
-        profesores_a_crear = [Profesor(nombre=fake.first_name(), apellido=fake.last_name(), email=fake.unique.email()) for _ in range(kwargs['num_profesores'])]
+        profesores_a_crear = [Profesor(nombre=fake.first_name(), apellido=fake.last_name(), email=fake.unique.email(), fecha_contratacion=fake.date_between(start_date='-20y', end_date='-1y')) for _ in range(kwargs['num_profesores'])]
         Profesor.objects.bulk_create(profesores_a_crear)
         self.stdout.write(self.style.SUCCESS(f"{kwargs['num_profesores']} Profesores creados."))
         
