@@ -89,7 +89,7 @@ class Command(BaseCommand):
         self.stdout.write('Creando Cursos...')
         cursos_data = {'Preescolar': ['Pre-Kinder', 'Kinder'], 'Primaria': [f'{i}mo de Primaria' for i in range(1, 7)], 'Secundaria': [f'{i}ro de Secundaria' for i in range(1, 7)]}
         cursos_a_crear = [Curso(nombre_curso=nombre, nivel_educativo=nivel) for nivel, nombres in cursos_data.items() for nombre in nombres]
-        Curso.objects.bulk_create(cursos_a_crear)
+        Curso.objects.bulk_create(cursos_a_crear, ignore_conflicts=True)
         self.stdout.write(self.style.SUCCESS(f'{len(cursos_a_crear)} Cursos creados.'))
 
         # Materias
