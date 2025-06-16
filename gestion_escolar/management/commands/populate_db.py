@@ -8,7 +8,8 @@ from faker import Faker
 
 from gestion_escolar.models import (
     Alumno, Profesor, Curso, Materia, AsignacionCursoMateria, Inscripcion,
-    Nota, Asistencia, Participacion, Tutor, AlumnoTutor, Usuario
+    Nota, Asistencia, ActividadProyecto, EntregaActividad, Participacion,
+    Tutor, AlumnoTutor, Usuario
 )
 
 class Command(BaseCommand):
