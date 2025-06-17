@@ -118,7 +118,7 @@ class Inscripcion(models.Model):
     def __str__(self):
         return f"{self.alumno.nombre} en {self.curso.nombre_curso} ({self.anio_academico} {self.periodo})"
 
-class Nota(models.Model):
+class   Nota(models.Model):
     inscripcion = models.ForeignKey(Inscripcion, on_delete=models.CASCADE, null=False)
     materia = models.ForeignKey(Materia, on_delete=models.CASCADE, null=False)
     TIPO_EVALUACION_CHOICES = [
@@ -136,7 +136,8 @@ class Nota(models.Model):
         max_digits=5,
         decimal_places=2,
         null=False,
-        validators=[MinValueValidator(0.00), MaxValueValidator(100.00)]
+        validators=[MinValueValidator(0.00), MaxValueValidator(100.00)],
+        db_index=True
     )
     fecha_evaluacion = models.DateField(null=False)
     profesor = models.ForeignKey(Profesor, on_delete=models.CASCADE, null=False)
@@ -155,7 +156,7 @@ class Asistencia(models.Model):
         ('Tarde', 'Tarde'),
         ('Justificado', 'Justificado'),
     ]
-    estado = models.CharField(max_length=20, choices=ESTADO_ASISTENCIA_CHOICES, null=False)
+    estado = models.CharField(max_length=20, choices=ESTADO_ASISTENCIA_CHOICES, null=False, db_index=True)
     observaciones = models.TextField(null=True, blank=True)
     profesor = models.ForeignKey(Profesor, on_delete=models.CASCADE, null=True, blank=True) # Profesor que tomó la asistencia
 
@@ -218,6 +219,7 @@ class Participacion(models.Model):
     puntuacion = models.DecimalField(
         max_digits=3,
         decimal_places=2,
+        db_index=True,
         null=False,
         validators=[MinValueValidator(0.00), MaxValueValidator(10.00)] # Ajusta este rango si es necesario
     )
